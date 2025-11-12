@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  vite-app:
+    image: nginx:alpine
+    container_name: vite_app
+    ports:
+      - "8080:80"
+    restart: always
+    volumes:
+      - ./build:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf  # nếu có config riêng
