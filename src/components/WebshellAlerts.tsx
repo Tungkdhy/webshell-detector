@@ -12,12 +12,22 @@ import {
   X,
   Info,
   Hash,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 const ALERTS_ENDPOINT = (import.meta as any)?.env?.VITE_ALERTS_ENDPOINT ?? 'http://localhost:8000/api/alerts';
-const PAGE_SIZE = 50;
-const USER_TOKEN = 'CHANGE_ME_USER_TOKEN';
+const PAGE_SIZE = 10;
 
 type SeverityLevel = 'critical' | 'high' | 'medium' | 'low';
 type AlertStatus = 'new' | 'reviewing' | 'confirmed' | 'false-positive';
@@ -161,6 +171,7 @@ const normalizeAlert = (alert: AlertApiItem): NormalizedAlert => {
 type SeverityFilter = SeverityLevel | 'all';
 
 export function WebshellAlerts() {
+  const { user } = useAuth();
   const [alerts, setAlerts] = useState<NormalizedAlert[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
@@ -168,7 +179,8 @@ export function WebshellAlerts() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [meta, setMeta] = useState({ total: 0, page: 1, pageSize: 50 });
+  const [meta, setMeta] = useState({ total: 0, page: 1, pageSize: 10 });
+  const [pageSize, setPageSize] = useState(10);
   const [macQuery, setMacQuery] = useState('');
   const [startInput, setStartInput] = useState('');
   const [endInput, setEndInput] = useState('');
@@ -202,7 +214,7 @@ export function WebshellAlerts() {
       try {
         const url = new URL(ALERTS_ENDPOINT);
         url.searchParams.set('page', page?.toString() ?? '1');
-        url.searchParams.set('page_size', PAGE_SIZE.toString());
+        url.searchParams.set('page_size', pageSize.toString());
         if (mac && mac.length > 0) {
           url.searchParams.set('mac', mac);
         }
@@ -216,7 +228,8 @@ export function WebshellAlerts() {
         const { data } = await axios.get<AlertsApiResponse>(url.toString(), {
           headers: {
             accept: 'application/json',
-            'X-User-Token': USER_TOKEN,
+            'Authorization': user?.token ? `Bearer ${user.token}` : '',
+            'X-User-Token': user?.token || '',
           },
           signal,
         });
@@ -226,7 +239,7 @@ export function WebshellAlerts() {
         setMeta({
           total: data.total ?? normalized.length,
           page: data.page ?? page ?? 1,
-          pageSize: data.page_size ?? PAGE_SIZE,
+          pageSize: data.page_size ?? pageSize,
         });
       } catch (err) {
         if (err instanceof CanceledError) {
@@ -249,7 +262,7 @@ export function WebshellAlerts() {
         }
       }
     },
-    []
+    [user, pageSize]
   );
 
   useEffect(() => {
@@ -260,10 +273,45 @@ export function WebshellAlerts() {
     return () => clearTimeout(handler);
   }, [searchTerm]);
 
+  const formatDateTimeForAPI = (dateTimeString: string): string => {
+    if (!dateTimeString) return '';
+    const date = new Date(dateTimeString);
+    if (Number.isNaN(date.getTime())) return '';
+    
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  };
+
+  const formatDateTimeForInput = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  // Set default values: end = now, start = 2 months ago
+  useEffect(() => {
+    const now = new Date();
+    const twoMonthsAgo = new Date();
+    twoMonthsAgo.setMonth(now.getMonth() - 2);
+    
+    setEndInput(formatDateTimeForInput(now));
+    setStartInput(formatDateTimeForInput(twoMonthsAgo));
+  }, []);
+
   useEffect(() => {
     const handler = setTimeout(() => {
-      setStartQuery(startInput ? new Date(startInput).toISOString() : undefined);
-      setEndQuery(endInput ? new Date(endInput).toISOString() : undefined);
+      setStartQuery(startInput ? formatDateTimeForAPI(startInput) : undefined);
+      setEndQuery(endInput ? formatDateTimeForAPI(endInput) : undefined);
       setPage(1);
     }, 300);
     return () => clearTimeout(handler);
@@ -279,6 +327,21 @@ export function WebshellAlerts() {
       page,
     });
     return () => controller.abort();
+  }, [fetchAlerts, macQuery, startQuery, endQuery, page, pageSize]);
+
+  // Auto-refresh every 4 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAlerts({
+        silent: true,
+        mac: macQuery || undefined,
+        start: startQuery,
+        end: endQuery,
+        page,
+      });
+    }, 4000);
+
+    return () => clearInterval(interval);
   }, [fetchAlerts, macQuery, startQuery, endQuery, page]);
 
   const severityCounts = useMemo(
@@ -302,9 +365,54 @@ export function WebshellAlerts() {
 
   const totalPages = useMemo(() => {
     const total = meta.total || alerts.length || 0;
-    const size = meta.pageSize || PAGE_SIZE;
+    const size = pageSize;
     return Math.max(1, Math.ceil(total / size));
-  }, [meta.total, meta.pageSize, alerts.length]);
+  }, [meta.total, pageSize, alerts.length]);
+
+  const handlePageSizeChange = (newSize: string) => {
+    setPageSize(Number(newSize));
+    setPage(1);
+  };
+
+  const renderPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const showEllipsis = totalPages > 7;
+
+    if (totalPages <= 7) {
+      // Hiển thị tất cả các trang nếu <= 7
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Logic hiển thị với ellipsis
+      if (page <= 3) {
+        // Trang đầu: 1, 2, 3, 4, 5, ..., totalPages
+        for (let i = 1; i <= 5; i++) {
+          pages.push(i);
+        }
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      } else if (page >= totalPages - 2) {
+        // Trang cuối: 1, ..., totalPages-4, totalPages-3, totalPages-2, totalPages-1, totalPages
+        pages.push(1);
+        pages.push('ellipsis');
+        for (let i = totalPages - 4; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        // Trang giữa: 1, ..., page-1, page, page+1, ..., totalPages
+        pages.push(1);
+        pages.push('ellipsis');
+        pages.push(page - 1);
+        pages.push(page);
+        pages.push(page + 1);
+        pages.push('ellipsis');
+        pages.push(totalPages);
+      }
+    }
+
+    return pages;
+  };
 
   const handlePrevPage = () => setPage((current) => Math.max(1, current - 1));
   const handleNextPage = () => setPage((current) => Math.min(totalPages, current + 1));
@@ -564,29 +672,96 @@ export function WebshellAlerts() {
             <p>Không tìm thấy cảnh báo nào</p>
           </div>
         )}
-      </motion.div>
 
-      <div className="mt-4 flex flex-col gap-2 text-sm text-gray-600 md:flex-row md:items-center md:justify-between">
-        <span>
-          Trang {page} / {totalPages} · {meta.total} kết quả
-        </span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handlePrevPage}
-            disabled={page === 1 || loading}
-            className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Trước
-          </button>
-          <button
-            onClick={handleNextPage}
-            disabled={page === totalPages || loading}
-            className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Tiếp
-          </button>
+        {/* Pagination */}
+        <div style={{padding: '16px'}} className="border-t border-gray-200 px-4 py-4">
+          <div className="flex items-center justify-between gap-4">
+            {/* Left: Page Info */}
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 rounded-lg border border-indigo-200">
+                <span className="text-sm font-semibold text-indigo-700">Trang</span>
+                <span className="text-sm font-bold text-indigo-900">{page}</span>
+                <span className="text-sm text-indigo-500">/</span>
+                <span className="text-sm text-indigo-600">{totalPages}</span>
+              </div>
+              <div className="h-6 w-px bg-gray-300"></div>
+              <span className="text-sm text-gray-600">
+                <span className="font-medium text-gray-800">{meta.total}</span> kết quả
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                style={{padding:6,    width: 36}}
+                whileTap={{ scale: 0.95 }}
+                onClick={handlePrevPage}
+                disabled={page === 1 || loading}
+                className="flex items-center justify-center w-11 h-11 rounded-full border border-gray-300 bg-white text-gray-600 transition-all hover:border-indigo-500 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:bg-white disabled:hover:text-gray-600"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </motion.button>
+              
+              {renderPageNumbers().map((item, index) => {
+                if (item === 'ellipsis') {
+                  return (
+                    <span key={`ellipsis-${index}`} className="px-2 text-gray-400 text-base">
+                      ...
+                    </span>
+                  );
+                }
+                
+                const pageNum = item as number;
+                const isActive = pageNum === page;
+                
+                return (
+                  <motion.button
+                  style={{padding:6,    width: 36}}
+                    key={pageNum}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setPage(pageNum)}
+                    disabled={loading}
+                    className={` rounded-full text-base font-medium transition-all ${
+                      isActive
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30 border-2 border-indigo-700'
+                        : 'bg-white text-gray-700 border border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-700'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                  >
+                    {pageNum}
+                  </motion.button>
+                );
+              })}
+              
+              <motion.button
+  style={{padding:6,    width: 36}}
+whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleNextPage}
+                disabled={page === totalPages || loading}
+                className="flex items-center justify-center w-11 h-11 rounded-full border border-gray-300 bg-white text-gray-600 transition-all hover:border-indigo-500 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-300 disabled:hover:bg-white disabled:hover:text-gray-600"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </motion.button>
+            </div>
+            
+            {/* Right: Items Per Page */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
+                <SelectTrigger className="w-[110px] h-9 border border-gray-300 bg-white text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 / page</SelectItem>
+                  <SelectItem value="20">20 / page</SelectItem>
+                  <SelectItem value="50">50 / page</SelectItem>
+                  <SelectItem value="100">100 / page</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
-      </div>
+      </motion.div>
 
       <AnimatePresence>
         {selectedAlert && (

@@ -12,9 +12,9 @@ import {
   Network,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 
 const AGENTS_ENDPOINT = 'http://localhost:8000/api/agents';
-const USER_TOKEN = 'CHANGE_ME_USER_TOKEN';
 
 type AgentStatus = 'active' | 'inactive' | 'scanning';
 
@@ -130,6 +130,7 @@ const normalizeAgent = (agent: AgentApiItem): NormalizedAgent => {
 };
 
 export function AgentManagement() {
+  const { user } = useAuth();
   const [agents, setAgents] = useState<NormalizedAgent[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -150,7 +151,8 @@ export function AgentManagement() {
         const { data } = await axios.get<{ items: AgentApiItem[] }>(AGENTS_ENDPOINT, {
           headers: {
             accept: 'application/json',
-            'X-User-Token': USER_TOKEN,
+            'Authorization': user?.token ? `Bearer ${user.token}` : '',
+            'X-User-Token': user?.token || '',
           },
           signal,
         });
@@ -177,7 +179,7 @@ export function AgentManagement() {
         }
       }
     },
-    []
+    [user]
   );
 
   useEffect(() => {

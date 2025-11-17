@@ -1,15 +1,40 @@
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Shield, AlertTriangle, History, Menu, X } from 'lucide-react';
-import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Shield, AlertTriangle, History, Menu, X, LogOut, Database } from 'lucide-react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { Button } from './ui/button';
 
 export function Sidebar() {
   const [isOpen, setIsOpen] = useState(true);
   const location = useLocation();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  const getUserInitials = () => {
+    if (user?.username) {
+      return user.username.substring(0, 2).toUpperCase();
+    }
+    return 'SA';
+  };
+
+  const getUserEmail = () => {
+    return user?.email || 'security@system.com';
+  };
+
+  const getUserName = () => {
+    return user?.username || 'Security Admin';
+  };
 
   const menuItems = [
     { path: '/alerts', label: 'Cảnh Báo Webshell', icon: AlertTriangle },
     { path: '/agents', label: 'Quản Lý Agent', icon: Shield },
+    // { path: '/db-config', label: 'Cấu hình DB', icon: Database },
     // { path: '/history', label: 'Lịch Sử Phát Hiện', icon: History },
   ];
 
@@ -79,15 +104,23 @@ export function Sidebar() {
           transition={{ delay: 0.5 }}
           className="absolute bottom-0 left-0 right-0 p-6 border-t border-indigo-500"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-indigo-400 rounded-full flex items-center justify-center">
-              <span>SA</span>
+              <span>{getUserInitials()}</span>
             </div>
-            <div>
-              <p>Security Admin</p>
-              <p className="text-indigo-200 text-sm">security@system.com</p>
+            <div className="flex-1 min-w-0">
+              <p className="truncate font-medium">{getUserName()}</p>
+              <p className="text-indigo-200 text-sm truncate">{getUserEmail()}</p>
             </div>
           </div>
+          <Button
+            onClick={handleLogout}
+            variant="outline"
+            className="w-full bg-white/10 hover:bg-white/20 text-white border-indigo-400"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Đăng xuất
+          </Button>
         </motion.div>
       </motion.div>
 

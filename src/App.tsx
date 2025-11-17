@@ -1,3 +1,4 @@
+import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   BrowserRouter,
@@ -6,6 +7,9 @@ import {
   Routes,
   useLocation,
 } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { WebshellAlerts } from './components/WebshellAlerts';
 import { AgentManagement } from './components/AgentManagement';
@@ -42,7 +46,19 @@ function Layout() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Layout />
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }
