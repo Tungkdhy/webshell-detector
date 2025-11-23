@@ -14,7 +14,10 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
-const AGENTS_ENDPOINT = 'http://localhost:8000/api/agents';
+// const AGENTS_ENDPOINT = 'http://localhost:8000/api/agents';
+import { CONFIG } from '../config/const';
+const base = CONFIG.AUTH_ENDPOINT || 'http://localhost:8000/api/';
+export const AGENTS_ENDPOINT = `${base}agents`;
 
 type AgentStatus = 'active' | 'inactive' | 'scanning';
 

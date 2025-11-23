@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import axios, { isAxiosError } from 'axios';
-
+import { CONFIG } from '../config/const';
 interface LoginResponse {
   access_token: string;
   token_type: string;
@@ -11,6 +11,7 @@ interface User {
   username: string;
   email: string;
   token: string;
+  is_admin?: boolean;
 }
 
 interface AuthContextType {
@@ -21,7 +22,24 @@ interface AuthContextType {
   isLoading: boolean;
 }
 
-const AUTH_ENDPOINT = (import.meta as any)?.env?.VITE_AUTH_ENDPOINT ?? 'http://localhost:8000/api/auth/login';
+const AUTH_ENDPOINT = CONFIG.AUTH_ENDPOINT + 'auth/login';
+
+// Helper function to decode JWT token
+const decodeJWT = (token: string): any => {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(jsonPayload);
+  } catch (error) {
+    return null;
+  }
+};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -37,6 +55,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (storedToken && storedUser) {
       try {
         const userData = JSON.parse(storedUser);
+        // Decode token để lấy is_admin nếu chưa có trong storedUser
+        if (userData.is_admin === undefined) {
+          const decodedToken = decodeJWT(storedToken);
+          userData.is_admin = decodedToken?.is_admin || false;
+        }
         setUser({ ...userData, token: storedToken });
       } catch (error) {
         // Nếu parse lỗi, xóa dữ liệu không hợp lệ
@@ -67,10 +90,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { access_token, username: responseUsername } = response.data;
       
+      // Decode JWT để lấy is_admin
+      const decodedToken = decodeJWT(access_token);
+      const isAdmin = decodedToken?.is_admin || false;
+      
       const userData: User = {
         username: responseUsername,
         email: `${responseUsername}@system.com`,
         token: access_token,
+        is_admin: isAdmin,
       };
       
       // Lưu vào localStorage
@@ -78,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('auth_user', JSON.stringify({
         username: userData.username,
         email: userData.email,
+        is_admin: isAdmin,
       }));
       
       setUser(userData);

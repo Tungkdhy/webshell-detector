@@ -15,6 +15,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
+  Folder,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -25,9 +27,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { CONFIG } from '../config/const';
 
-const ALERTS_ENDPOINT = (import.meta as any)?.env?.VITE_ALERTS_ENDPOINT ?? 'http://localhost:8000/api/alerts';
+const base = CONFIG.AUTH_ENDPOINT || 'http://localhost:8000/api/';
+export const ALERTS_ENDPOINT = `${base}alerts`;
+export const MONITOR_DIRS_ENDPOINT = `${base}monitor-dirs`;
 const PAGE_SIZE = 10;
+const TARGET_MONITOR_DIRS = 20; // Số lượng monitor_dir muốn hiển thị
 
 type SeverityLevel = 'critical' | 'high' | 'medium' | 'low';
 type AlertStatus = 'new' | 'reviewing' | 'confirmed' | 'false-positive';
@@ -61,14 +67,20 @@ interface AlertRule {
 interface AlertApiItem {
   id: number;
   received_at?: string;
-  agent_id: string;
-  host: HostInfo;
+  agent_id?: string;
+  host?: HostInfo;
   path: string;
   reason?: string;
   hash_before?: string | null;
   hash_after?: string | null;
   rules?: AlertRule[];
   timestamp?: string;
+  ts?: string;
+  monitor_dir?: string;
+  yara_rules?: string;
+  op?: string;
+  level?: number;
+  sent_remote?: number;
 }
 
 interface AlertsApiResponse {
@@ -76,6 +88,20 @@ interface AlertsApiResponse {
   total?: number;
   page?: number;
   page_size?: number;
+}
+
+interface MonitorDirItem {
+  monitor_dir: string | null;
+  agent_id: string;
+  alert_count: number;
+  high_count: number;
+  critical_count: number;
+  last_alert_at: string;
+}
+
+interface MonitorDirsResponse {
+  items: MonitorDirItem[];
+  count: number;
 }
 
 interface NormalizedAlert {
@@ -94,6 +120,7 @@ interface NormalizedAlert {
   agentId: string;
   reason: string;
   hashBefore: string;
+  monitorDir: string;
   raw: AlertApiItem;
 }
 
@@ -142,29 +169,58 @@ const deriveStatus = (alert: AlertApiItem): AlertStatus => {
 };
 
 const buildSuspiciousPatterns = (alert: AlertApiItem) => {
-  const patterns = alert.rules?.map((rule) => rule.meta?.description || rule.name || rule.namespace).filter(Boolean) as string[] | undefined;
+  // Try to parse yara_rules if it's a JSON string
+  let rules: AlertRule[] = alert.rules || [];
+  
+  if (alert.yara_rules && typeof alert.yara_rules === 'string') {
+    try {
+      const parsed = JSON.parse(alert.yara_rules);
+      if (Array.isArray(parsed)) {
+        rules = parsed;
+      }
+    } catch (e) {
+      // If parsing fails, use existing rules
+    }
+  }
+  
+  const patterns = rules.map((rule) => rule.meta?.description || rule.name || rule.namespace).filter(Boolean) as string[] | undefined;
   return patterns && patterns.length > 0 ? patterns : ['Không có mô tả quy tắc'];
 };
 
 const normalizeAlert = (alert: AlertApiItem): NormalizedAlert => {
   const fileName = alert.path.split(/[/\\]/).pop() ?? alert.path;
+  
+  // Parse yara_rules if it's a JSON string
+  let rules: AlertRule[] = alert.rules || [];
+  if (alert.yara_rules && typeof alert.yara_rules === 'string') {
+    try {
+      const parsed = JSON.parse(alert.yara_rules);
+      if (Array.isArray(parsed)) {
+        rules = parsed;
+      }
+    } catch (e) {
+      // If parsing fails, use existing rules
+    }
+  }
+  
   return {
     id: alert.id,
     fileName,
     filePath: alert.path,
-    detectionTime: formatDateTime(alert.timestamp ?? alert.received_at),
-    severity: deriveSeverity(alert),
+    detectionTime: formatDateTime(alert.timestamp ?? alert.ts ?? alert.received_at),
+    severity: deriveSeverity({ ...alert, rules }),
     server: alert.host?.hostname ?? alert.host?.ipv4?.[0] ?? alert.agent_id ?? 'Không xác định',
-    malwareType: alert.rules?.map((rule) => rule.name ?? 'Không rõ').join(', ') || 'Không rõ',
+    malwareType: rules.map((rule) => rule.name ?? 'Không rõ').join(', ') || 'Không rõ',
     md5Hash: alert.hash_after ?? '—',
     status: deriveStatus(alert),
-    suspiciousPatterns: buildSuspiciousPatterns(alert),
+    suspiciousPatterns: buildSuspiciousPatterns({ ...alert, rules }),
     fileSize: '—',
-    lastModified: formatDateTime(alert.received_at ?? alert.timestamp),
-    agentId: alert.agent_id,
+    lastModified: formatDateTime(alert.received_at ?? alert.timestamp ?? alert.ts),
+    agentId: alert.agent_id ?? '—',
     reason: alert.reason ?? '—',
     hashBefore: alert.hash_before ?? '—',
-    raw: alert,
+    monitorDir: alert.monitor_dir ?? '—',
+    raw: { ...alert, rules },
   };
 };
 
@@ -172,7 +228,9 @@ type SeverityFilter = SeverityLevel | 'all';
 
 export function WebshellAlerts() {
   const { user } = useAuth();
+  const [monitorDirs, setMonitorDirs] = useState<MonitorDirItem[]>([]);
   const [alerts, setAlerts] = useState<NormalizedAlert[]>([]);
+  const [alertsByDir, setAlertsByDir] = useState<Map<string, NormalizedAlert[]>>(new Map());
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
   const [selectedAlert, setSelectedAlert] = useState<NormalizedAlert | null>(null);
@@ -186,43 +244,113 @@ export function WebshellAlerts() {
   const [endInput, setEndInput] = useState('');
   const [startQuery, setStartQuery] = useState<string | undefined>(undefined);
   const [endQuery, setEndQuery] = useState<string | undefined>(undefined);
+  const [monitorDirInput, setMonitorDirInput] = useState('');
+  const [monitorDirQuery, setMonitorDirQuery] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 
-  const fetchAlerts = useCallback(
+  const fetchMonitorDirs = useCallback(
     async ({
       signal,
       silent,
-      mac,
-      start,
-      end,
-      page,
     }: {
       signal?: AbortSignal;
       silent?: boolean;
-      mac?: string;
-      start?: string;
-      end?: string;
-      page?: number;
     } = {}) => {
-      if (silent) {
-        setRefreshing(true);
-      } else {
+      if (!silent) {
         setLoading(true);
       }
       setError(null);
 
       try {
+        const url = new URL(MONITOR_DIRS_ENDPOINT);
+        if (macQuery && macQuery.length > 0) {
+          url.searchParams.set('mac', macQuery);
+        }
+        if (startQuery) {
+          url.searchParams.set('start_time', startQuery);
+        }
+        if (endQuery) {
+          url.searchParams.set('end_time', endQuery);
+        }
+        if (monitorDirQuery && monitorDirQuery.trim().length > 0) {
+          url.searchParams.set('monitor_dir_contains', monitorDirQuery.trim());
+        }
+
+        const { data } = await axios.get<MonitorDirsResponse>(url.toString(), {
+          headers: {
+            accept: 'application/json',
+            'Authorization': user?.token ? `Bearer ${user.token}` : '',
+            'X-User-Token': user?.token || '',
+          },
+          signal,
+        });
+
+        setMonitorDirs(data.items);
+        setMeta({
+          total: data.count ?? data.items.length,
+          page: 1,
+          pageSize: pageSize,
+        });
+      } catch (err) {
+        if (err instanceof CanceledError) {
+          return;
+        }
+        if (isAxiosError(err)) {
+          setError(err.response?.data?.message ?? err.message);
+        } else if (err instanceof Error) {
+          setError(err.message);
+        } else {
+          setError('Không thể tải dữ liệu monitor directories');
+        }
+      } finally {
+        if (!silent && !signal?.aborted) {
+          setLoading(false);
+        }
+      }
+    },
+    [user, macQuery, startQuery, endQuery, monitorDirQuery, pageSize]
+  );
+
+  const fetchAlerts = useCallback(
+    async ({
+      signal,
+      silent,
+      monitorDir,
+      agentId,
+    }: {
+      signal?: AbortSignal;
+      silent?: boolean;
+      monitorDir?: string | null;
+      agentId?: string;
+    } = {}) => {
+      if (silent) {
+        setRefreshing(true);
+      }
+      setError(null);
+
+      try {
         const url = new URL(ALERTS_ENDPOINT);
-        url.searchParams.set('page', page?.toString() ?? '1');
-        url.searchParams.set('page_size', pageSize.toString());
-        if (mac && mac.length > 0) {
-          url.searchParams.set('mac', mac);
+        url.searchParams.set('page', '1');
+        url.searchParams.set('page_size', '100');
+        if (monitorDir !== undefined) {
+          if (monitorDir === null) {
+            url.searchParams.set('monitor_dir', '');
+          } else {
+            url.searchParams.set('monitor_dir', monitorDir);
+          }
         }
-        if (start) {
-          url.searchParams.set('start_time', start);
+        if (agentId) {
+          url.searchParams.set('agent_id', agentId);
         }
-        if (end) {
-          url.searchParams.set('end_time', end);
+        if (macQuery && macQuery.length > 0) {
+          url.searchParams.set('mac', macQuery);
+        }
+        if (startQuery) {
+          url.searchParams.set('start_time', startQuery);
+        }
+        if (endQuery) {
+          url.searchParams.set('end_time', endQuery);
         }
 
         const { data } = await axios.get<AlertsApiResponse>(url.toString(), {
@@ -235,12 +363,16 @@ export function WebshellAlerts() {
         });
 
         const normalized = data.items.map(normalizeAlert);
-        setAlerts(normalized);
-        setMeta({
-          total: data.total ?? normalized.length,
-          page: data.page ?? page ?? 1,
-          pageSize: data.page_size ?? pageSize,
-        });
+        if (monitorDir !== undefined) {
+          const dirKey = monitorDir || 'null';
+          setAlertsByDir((prev) => {
+            const next = new Map(prev);
+            next.set(dirKey, normalized);
+            return next;
+          });
+        } else {
+          setAlerts(normalized);
+        }
       } catch (err) {
         if (err instanceof CanceledError) {
           return;
@@ -253,16 +385,12 @@ export function WebshellAlerts() {
           setError('Không thể tải dữ liệu cảnh báo');
         }
       } finally {
-        if (silent) {
-          if (!signal?.aborted) {
-            setRefreshing(false);
-          }
-        } else if (!signal?.aborted) {
-          setLoading(false);
+        if (silent && !signal?.aborted) {
+          setRefreshing(false);
         }
       }
     },
-    [user, pageSize]
+    [user, macQuery, startQuery, endQuery]
   );
 
   useEffect(() => {
@@ -272,6 +400,14 @@ export function WebshellAlerts() {
     }, 300);
     return () => clearTimeout(handler);
   }, [searchTerm]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setMonitorDirQuery(monitorDirInput.trim() || undefined);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [monitorDirInput]);
 
   const formatDateTimeForAPI = (dateTimeString: string): string => {
     if (!dateTimeString) return '';
@@ -317,57 +453,96 @@ export function WebshellAlerts() {
     return () => clearTimeout(handler);
   }, [startInput, endInput]);
 
+  // Fetch monitor-dirs when filters change
   useEffect(() => {
     const controller = new AbortController();
-    fetchAlerts({
+    fetchMonitorDirs({
       signal: controller.signal,
-      mac: macQuery || undefined,
-      start: startQuery,
-      end: endQuery,
-      page,
     });
     return () => controller.abort();
-  }, [fetchAlerts, macQuery, startQuery, endQuery, page, pageSize]);
+  }, [fetchMonitorDirs]);
 
-  // Auto-refresh every 4 seconds
+  // Auto-refresh monitor-dirs every 4 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchAlerts({
+      fetchMonitorDirs({
         silent: true,
-        mac: macQuery || undefined,
-        start: startQuery,
-        end: endQuery,
-        page,
       });
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [fetchAlerts, macQuery, startQuery, endQuery, page]);
+  }, [fetchMonitorDirs]);
 
+  // Tính toán severity counts từ monitorDirs
   const severityCounts = useMemo(
-    () =>
-      alerts.reduce(
-        (acc, alert) => {
-          acc[alert.severity] += 1;
-          return acc;
-        },
-        { critical: 0, high: 0, medium: 0, low: 0 } as Record<SeverityLevel, number>
-      ),
-    [alerts]
+    () => {
+      const counts = { critical: 0, high: 0, medium: 0, low: 0 } as Record<SeverityLevel, number>;
+      monitorDirs.forEach((dir) => {
+        counts.critical += dir.critical_count;
+        counts.high += dir.high_count;
+        // Ước tính medium và low từ alert_count
+        const remaining = dir.alert_count - dir.critical_count - dir.high_count;
+        if (remaining > 0) {
+          counts.medium += Math.floor(remaining / 2);
+          counts.low += remaining - Math.floor(remaining / 2);
+        }
+      });
+      return counts;
+    },
+    [monitorDirs]
   );
 
-  const filteredAlerts = useMemo(() => {
-    return alerts.filter((alert) => severityFilter === 'all' || alert.severity === severityFilter);
-  }, [alerts, severityFilter]);
+  // Sử dụng monitorDirs từ API, kết hợp với alertsByDir
+  const groupedAlerts = useMemo(() => {
+    const groups = new Map<string, { monitorDir: MonitorDirItem; alerts: NormalizedAlert[] }>();
+    
+    monitorDirs.forEach((monitorDir) => {
+      const dirKey = monitorDir.monitor_dir || 'null';
+      const alerts = alertsByDir.get(dirKey) || [];
+      // Filter alerts by severity if needed
+      const filtered = severityFilter === 'all' 
+        ? alerts 
+        : alerts.filter((alert) => alert.severity === severityFilter);
+      groups.set(dirKey, { monitorDir, alerts: filtered });
+    });
+    
+    return groups;
+  }, [monitorDirs, alertsByDir, severityFilter]);
 
-  const totalServers = useMemo(() => new Set(alerts.map((alert) => alert.server)).size, [alerts]);
-  const totalNewAlerts = useMemo(() => alerts.filter((alert) => alert.status === 'new').length, [alerts]);
+  const toggleDir = (dir: string, agentId: string) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      const dirKey = dir === 'null' ? 'null' : dir;
+      if (next.has(dirKey)) {
+        next.delete(dirKey);
+      } else {
+        next.add(dirKey);
+        // Fetch alerts for this monitor_dir when expanding
+        const monitorDirValue = dir === 'null' ? null : dir;
+        fetchAlerts({
+          monitorDir: monitorDirValue,
+          agentId: agentId,
+        });
+      }
+      return next;
+    });
+  };
+
+  const totalServers = useMemo(() => new Set(monitorDirs.map((dir) => dir.agent_id)).size, [monitorDirs]);
+  const totalNewAlerts = useMemo(() => {
+    // Tính tổng số alerts mới từ tất cả alerts đã load
+    let total = 0;
+    alertsByDir.forEach((alerts) => {
+      total += alerts.filter((alert) => alert.status === 'new').length;
+    });
+    return total;
+  }, [alertsByDir]);
 
   const totalPages = useMemo(() => {
-    const total = meta.total || alerts.length || 0;
+    const total = meta.total || monitorDirs.length || 0;
     const size = pageSize;
     return Math.max(1, Math.ceil(total / size));
-  }, [meta.total, pageSize, alerts.length]);
+  }, [meta.total, pageSize, monitorDirs.length]);
 
   const handlePageSizeChange = (newSize: string) => {
     setPageSize(Number(newSize));
@@ -456,7 +631,7 @@ export function WebshellAlerts() {
         >
           <AlertTriangle size={24} className="mb-1" />
           <p className="mb-1 text-sm">Tổng cảnh báo</p>
-          <p className="text-white">{alerts.length}</p>
+          <p className="text-white">{monitorDirs.reduce((sum, dir) => sum + dir.alert_count, 0)}</p>
         </motion.div>
 
         <motion.div
@@ -514,6 +689,20 @@ export function WebshellAlerts() {
         </div>
 
         <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">Thư mục giám sát</label>
+          <div className="relative w-full md:w-64">
+            <Folder className="absolute left-3 top-1/2 -translate-y-1/2 transform text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Ví dụ: 122314"
+              value={monitorDirInput}
+              onChange={(e) => setMonitorDirInput(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-3 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-gray-500">Mức độ</label>
           <select
             value={severityFilter}
@@ -559,18 +748,17 @@ export function WebshellAlerts() {
           <table className="w-full">
             <thead className="border-b border-gray-200 bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-sm text-gray-700">File</th>
-                <th className="px-4 py-3 text-left text-sm text-gray-700">Agent / Server</th>
+                <th className="px-4 py-3 text-left text-sm text-gray-700 w-8"></th>
+                <th className="px-4 py-3 text-left text-sm text-gray-700">Thư mục giám sát / File</th>
+                <th className="px-4 py-3 text-left text-sm text-gray-700" style={{ width: '200px' }}>Agent / Server</th>
                 <th className="px-4 py-3 text-left text-sm text-gray-700">Quy tắc khớp</th>
-                <th className="px-4 py-3 text-left text-sm text-gray-700">Mức độ</th>
-                <th className="px-4 py-3 text-left text-sm text-gray-700">Trạng thái</th>
+                <th className="px-4 py-3 text-left text-sm text-gray-700" style={{ width: '180px' }}>Mức độ</th>
                 <th className="px-4 py-3 text-left text-sm text-gray-700">Thời gian</th>
-                <th className="px-4 py-3 text-left text-sm text-gray-700">Hành động</th>
               </tr>
             </thead>
             <tbody>
               <AnimatePresence>
-                {loading && alerts.length === 0 ? (
+                {loading && monitorDirs.length === 0 ? (
                   <motion.tr
                     key="loading-row"
                     initial={{ opacity: 0 }}
@@ -578,87 +766,183 @@ export function WebshellAlerts() {
                     exit={{ opacity: 0 }}
                     className="border-b border-gray-100"
                   >
-                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-500">
+                    <td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-500">
                       Đang tải dữ liệu cảnh báo...
                     </td>
                   </motion.tr>
+                ) : groupedAlerts.size === 0 ? (
+                  <motion.tr
+                    key="no-results"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="border-b border-gray-100"
+                  >
+                    <td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-500">
+                      Không tìm thấy cảnh báo nào
+                    </td>
+                  </motion.tr>
                 ) : (
-                  filteredAlerts.map((alert, index) => {
-                  const severityStyle = severityConfig[alert.severity];
-                  const statusStyle = statusConfig[alert.status];
-                  return (
-                    <motion.tr
-                      key={alert.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                        transition={{ delay: index * 0.03 }}
-                        className="border-b border-gray-100 transition-colors hover:bg-gray-50"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <FileCode className="text-gray-400" size={16} />
-                          <div>
-                              <p className="text-sm text-gray-800">{alert.fileName}</p>
-                              <p className="text-xs text-gray-500">{alert.filePath}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1 text-sm text-gray-700">
-                            <span className="flex items-center gap-1.5 text-gray-700">
-                              <Server className="h-3.5 w-3.5 text-gray-400" />
-                              {alert.server}
-                            </span>
-                            <span className="text-xs text-gray-500">Agent: {alert.agentId}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                          <span
-                            className="text-sm text-gray-700"
-                            style={{
-                              display: 'inline-block',
-                              maxWidth: '280px',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              verticalAlign: 'middle',
-                            }}
-                            title={alert.malwareType}
-                          >
-                            {alert.malwareType}
-                          </span>
-                      </td>
-                      <td className="px-4 py-3">
-                          <span className={`${severityStyle.bg} ${severityStyle.color} inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs`}>
-                          <AlertTriangle size={12} />
-                          {severityStyle.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                          <span className={`${statusStyle.color} inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs text-white`}>
-                          {statusStyle.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                          <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Calendar size={14} />
-                            <span>{alert.detectionTime}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => setSelectedAlert(alert)}
-                            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-indigo-700"
+                  (Array.from(groupedAlerts.entries()) as [string, { monitorDir: MonitorDirItem; alerts: NormalizedAlert[] }][]).map(([dirKey, { monitorDir, alerts: dirAlerts }], dirIndex) => {
+                    const isExpanded = expandedDirs.has(dirKey);
+                    const dirSeverityCounts = {
+                      critical: monitorDir.critical_count,
+                      high: monitorDir.high_count,
+                      medium: 0,
+                      low: 0,
+                    };
+                    const maxSeverity = dirSeverityCounts.critical > 0 ? 'critical' :
+                                      dirSeverityCounts.high > 0 ? 'high' :
+                                      dirSeverityCounts.medium > 0 ? 'medium' : 'low';
+                    const dirSeverityStyle = severityConfig[maxSeverity];
+                    const displayDir = monitorDir.monitor_dir || 'Không xác định';
+
+                    return (
+                      <React.Fragment key={dirKey}>
+                        {/* Directory row */}
+                        <motion.tr
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, x: -20 }}
+                          transition={{ delay: dirIndex * 0.03 }}
+                          className="border-b border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => toggleDir(dirKey, monitorDir.agent_id)}
                         >
-                          <Eye size={14} />
-                          Chi tiết
-                        </motion.button>
-                      </td>
-                    </motion.tr>
-                  );
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center">
+                              <motion.div
+                                animate={{ rotate: isExpanded ? 180 : 0 }}
+                                transition={{ duration: 0.2 }}
+                              >
+                                <ChevronDown className="text-gray-600" size={18} />
+                              </motion.div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <Folder className="text-indigo-500" size={18} />
+                              <div>
+                                <p className="text-sm font-semibold text-gray-800">{displayDir}</p>
+                                <p className="text-xs text-gray-500">{monitorDir.alert_count} cảnh báo</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3" style={{ width: '200px' }}>
+                            <div className="flex flex-col gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`${dirSeverityStyle.bg} ${dirSeverityStyle.color} inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs`}>
+                                  <AlertTriangle size={12} />
+                                  {dirSeverityCounts.critical} nghiêm trọng, {dirSeverityCounts.high} cao
+                                </span>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <span className="flex items-center gap-1.5 text-xs text-gray-600">
+                                  <Server className="h-3.5 w-3.5 text-gray-400" />
+                                  {monitorDir.agent_id}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-sm text-gray-600">—</span>
+                          </td>
+                          <td className="px-4 py-3" style={{ width: '180px' }}>
+                            <span className={`${dirSeverityStyle.bg} ${dirSeverityStyle.color} inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs`}>
+                              <AlertTriangle size={12} />
+                              {dirSeverityStyle.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-sm text-gray-600">{formatDateTime(monitorDir.last_alert_at)}</span>
+                          </td>
+                        </motion.tr>
+                        
+                        {/* Alerts rows for this directory */}
+                        {isExpanded && (
+                          <AnimatePresence>
+                            {dirAlerts.length === 0 ? (
+                              <motion.tr
+                                key="loading-alerts"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="border-b border-gray-100"
+                              >
+                                <td colSpan={6} className="px-4 py-3 pl-8 text-center text-xs text-gray-500">
+                                  Đang tải cảnh báo...
+                                </td>
+                              </motion.tr>
+                            ) : (
+                              dirAlerts.map((alert, alertIndex) => {
+                                const severityStyle = severityConfig[alert.severity];
+                                return (
+                                <motion.tr
+                                  key={alert.id}
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  transition={{ delay: alertIndex * 0.02 }}
+                                  className="border-b border-gray-100 bg-white transition-colors hover:bg-gray-50 cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedAlert(alert);
+                                  }}
+                                >
+                                  <td className="px-4 py-3 pl-8"></td>
+                                  <td className="px-4 py-3 pl-8">
+                                    <div className="flex items-center gap-2">
+                                      <FileCode className="text-gray-400" size={16} />
+                                      <div>
+                                        <p className="text-sm text-gray-800">{alert.fileName}</p>
+                                        <p className="text-xs text-gray-500">{alert.filePath}</p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 pl-8" style={{ width: '200px' }}>
+                                    <div className="flex flex-col gap-1 text-sm text-gray-700">
+                                      <span className="flex items-center gap-1.5 text-gray-700">
+                                        <Server className="h-3.5 w-3.5 text-gray-400" />
+                                        {alert.server}
+                                      </span>
+                                      <span className="text-xs text-gray-500">Agent: {alert.agentId}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 pl-8">
+                                    <span
+                                      className="text-sm text-gray-700"
+                                      style={{
+                                        display: 'inline-block',
+                                        maxWidth: '280px',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        verticalAlign: 'middle',
+                                      }}
+                                      title={alert.malwareType}
+                                    >
+                                      {alert.malwareType}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 pl-8" style={{ width: '180px' }}>
+                                    <span className={`${severityStyle.bg} ${severityStyle.color} inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs`}>
+                                      <AlertTriangle size={12} />
+                                      {severityStyle.label}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 pl-8">
+                                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                                      <Calendar size={14} />
+                                      <span>{alert.detectionTime}</span>
+                                    </div>
+                                  </td>
+                                </motion.tr>
+                                );
+                              })
+                            )}
+                          </AnimatePresence>
+                        )}
+                      </React.Fragment>
+                    );
                   })
                 )}
               </AnimatePresence>
@@ -666,12 +950,6 @@ export function WebshellAlerts() {
           </table>
         </div>
 
-        {!loading && filteredAlerts.length === 0 && (
-          <div className="py-12 text-center text-gray-500">
-            <FileCode size={48} className="mx-auto mb-4 opacity-50" />
-            <p>Không tìm thấy cảnh báo nào</p>
-          </div>
-        )}
 
         {/* Pagination */}
         <div style={{padding: '16px'}} className="border-t border-gray-200 px-4 py-4">

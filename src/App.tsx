@@ -14,6 +14,7 @@ import { Sidebar } from './components/Sidebar';
 import { WebshellAlerts } from './components/WebshellAlerts';
 import { AgentManagement } from './components/AgentManagement';
 import { DetectionHistory } from './components/DetectionHistory';
+import { UserManagement } from './components/UserManagement';
 
 function Layout() {
   const location = useLocation();
@@ -33,6 +34,7 @@ function Layout() {
               <Route index element={<Navigate to="/alerts" replace />} />
               <Route path="/alerts" element={<WebshellAlerts />} />
               <Route path="/agents" element={<AgentManagement />} />
+              <Route path="/users" element={<UserManagement />} />
               {/* <Route path="/history" element={<DetectionHistory />} /> */}
               <Route path="*" element={<Navigate to="/alerts" replace />} />
             </Routes>
