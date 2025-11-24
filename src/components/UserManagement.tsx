@@ -27,11 +27,17 @@ export const USERS_ENDPOINT = `${base}admin/users`;
 export const AGENTS_ENDPOINT = `${base}agents`;
 
 interface AgentItem {
-  id: number;
+  id: string; // agent_unique_id
   agent_id: string;
   hostname: string;
   os?: string;
   arch?: string;
+  kernel?: string;
+  macs?: string[];
+  ipv4?: string[];
+  first_seen?: string;
+  last_seen?: string;
+  tag?: string;
 }
 
 interface UserApiItem {
@@ -301,17 +307,17 @@ export function UserManagement() {
             'X-User-Token': user?.token || '',
           },
         }),
-        axios.get<{ agent_ids: string[] }>(`${USERS_ENDPOINT}/${userItem.id}/agents`, {
+        axios.get<{ agent_unique_ids: string[] }>(`${USERS_ENDPOINT}/${userItem.id}/agents`, {
           headers: {
             accept: 'application/json',
             'Authorization': user?.token ? `Bearer ${user.token}` : '',
             'X-User-Token': user?.token || '',
           },
-        }).catch(() => ({ data: { agent_ids: [] } })),
+        }).catch(() => ({ data: { agent_unique_ids: [] } })),
       ]);
 
       setAllAgents(allAgentsRes.data.items || []);
-      setUserAgents(userAgentsRes.data.agent_ids || []);
+      setUserAgents(userAgentsRes.data.agent_unique_ids || []);
     } catch (err) {
       if (isAxiosError(err)) {
         setError(err.response?.data?.message ?? err.message);
@@ -332,24 +338,24 @@ export function UserManagement() {
     setUserAgents([]);
   };
 
-  const handleToggleAgent = async (agentId: string) => {
+  const handleToggleAgent = async (agentUniqueId: string) => {
     if (!selectedUserForAgents) return;
 
-    const isSelected = userAgents.includes(agentId);
-    let newAgentIds: string[];
+    const isSelected = userAgents.includes(agentUniqueId);
+    let newAgentUniqueIds: string[];
 
     if (isSelected) {
       // Remove agent
-      newAgentIds = userAgents.filter((id) => id !== agentId);
+      newAgentUniqueIds = userAgents.filter((id) => id !== agentUniqueId);
     } else {
       // Add agent
-      newAgentIds = [...userAgents, agentId];
+      newAgentUniqueIds = [...userAgents, agentUniqueId];
     }
 
     try {
       await axios.post(
         `${USERS_ENDPOINT}/${selectedUserForAgents.id}/agents`,
-        { agent_ids: newAgentIds },
+        { agent_unique_ids: newAgentUniqueIds },
         {
           headers: {
             accept: 'application/json',
@@ -359,7 +365,7 @@ export function UserManagement() {
           },
         }
       );
-      setUserAgents(newAgentIds);
+      setUserAgents(newAgentUniqueIds);
     } catch (err) {
       if (isAxiosError(err)) {
         setError(err.response?.data?.message ?? err.message);
@@ -938,7 +944,7 @@ export function UserManagement() {
                       <div className="py-8 text-center text-sm text-gray-500">Không có agents nào</div>
                     ) : (
                       allAgents.map((agent) => {
-                        const isSelected = userAgents.includes(agent.agent_id);
+                        const isSelected = userAgents.includes(agent.id);
                         return (
                           <motion.div
                             key={agent.id}
@@ -966,14 +972,14 @@ export function UserManagement() {
                                   {agent.agent_id}
                                 </p>
                                 <p className="text-xs text-gray-500 truncate">
-                                  {agent.hostname} {agent.os && `• ${agent.os}`}
+                                  {agent.hostname} {agent.os && `• ${agent.os}`} {agent.tag && `• ${agent.tag}`}
                                 </p>
                               </div>
                             </div>
                             <motion.button
                               whileHover={{ scale: 1.05 }}
                               whileTap={{ scale: 0.95 }}
-                              onClick={() => handleToggleAgent(agent.agent_id)}
+                              onClick={() => handleToggleAgent(agent.id)}
                               className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                                 isSelected
                                   ? 'bg-indigo-600 text-white hover:bg-indigo-700'

@@ -81,6 +81,7 @@ interface AlertApiItem {
   op?: string;
   level?: number;
   sent_remote?: number;
+  tag?: string;
 }
 
 interface AlertsApiResponse {
@@ -93,6 +94,7 @@ interface AlertsApiResponse {
 interface MonitorDirItem {
   monitor_dir: string | null;
   agent_id: string;
+  agent_unique_id: string;
   alert_count: number;
   high_count: number;
   critical_count: number;
@@ -121,6 +123,7 @@ interface NormalizedAlert {
   reason: string;
   hashBefore: string;
   monitorDir: string;
+  version: string;
   raw: AlertApiItem;
 }
 
@@ -220,6 +223,7 @@ const normalizeAlert = (alert: AlertApiItem): NormalizedAlert => {
     reason: alert.reason ?? '—',
     hashBefore: alert.hash_before ?? '—',
     monitorDir: alert.monitor_dir ?? '—',
+    version: alert.tag ?? '—',
     raw: { ...alert, rules },
   };
 };
@@ -317,12 +321,12 @@ export function WebshellAlerts() {
       signal,
       silent,
       monitorDir,
-      agentId,
+      agentUniqueId,
     }: {
       signal?: AbortSignal;
       silent?: boolean;
       monitorDir?: string | null;
-      agentId?: string;
+      agentUniqueId?: string;
     } = {}) => {
       if (silent) {
         setRefreshing(true);
@@ -340,8 +344,8 @@ export function WebshellAlerts() {
             url.searchParams.set('monitor_dir', monitorDir);
           }
         }
-        if (agentId) {
-          url.searchParams.set('agent_id', agentId);
+        if (agentUniqueId) {
+          url.searchParams.set('agent_unique_id', agentUniqueId);
         }
         if (macQuery && macQuery.length > 0) {
           url.searchParams.set('mac', macQuery);
@@ -509,7 +513,7 @@ export function WebshellAlerts() {
     return groups;
   }, [monitorDirs, alertsByDir, severityFilter]);
 
-  const toggleDir = (dir: string, agentId: string) => {
+  const toggleDir = (dir: string, agentUniqueId: string) => {
     setExpandedDirs((prev) => {
       const next = new Set(prev);
       const dirKey = dir === 'null' ? 'null' : dir;
@@ -521,7 +525,7 @@ export function WebshellAlerts() {
         const monitorDirValue = dir === 'null' ? null : dir;
         fetchAlerts({
           monitorDir: monitorDirValue,
-          agentId: agentId,
+          agentUniqueId: agentUniqueId,
         });
       }
       return next;
@@ -754,6 +758,7 @@ export function WebshellAlerts() {
                 <th className="px-4 py-3 text-left text-sm text-gray-700">Quy tắc khớp</th>
                 <th className="px-4 py-3 text-left text-sm text-gray-700" style={{ width: '180px' }}>Mức độ</th>
                 <th className="px-4 py-3 text-left text-sm text-gray-700">Thời gian</th>
+                <th className="px-4 py-3 text-left text-sm text-gray-700" style={{ width: '120px' }}>Version</th>
               </tr>
             </thead>
             <tbody>
@@ -766,7 +771,7 @@ export function WebshellAlerts() {
                     exit={{ opacity: 0 }}
                     className="border-b border-gray-100"
                   >
-                    <td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-500">
+                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-500">
                       Đang tải dữ liệu cảnh báo...
                     </td>
                   </motion.tr>
@@ -778,7 +783,7 @@ export function WebshellAlerts() {
                     exit={{ opacity: 0 }}
                     className="border-b border-gray-100"
                   >
-                    <td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-500">
+                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-500">
                       Không tìm thấy cảnh báo nào
                     </td>
                   </motion.tr>
@@ -806,7 +811,7 @@ export function WebshellAlerts() {
                           exit={{ opacity: 0, x: -20 }}
                           transition={{ delay: dirIndex * 0.03 }}
                           className="border-b border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
-                          onClick={() => toggleDir(dirKey, monitorDir.agent_id)}
+                          onClick={() => toggleDir(dirKey, monitorDir.agent_unique_id)}
                         >
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-center">
@@ -855,6 +860,9 @@ export function WebshellAlerts() {
                           <td className="px-4 py-3">
                             <span className="text-sm text-gray-600">{formatDateTime(monitorDir.last_alert_at)}</span>
                           </td>
+                          <td className="px-4 py-3" style={{ width: '120px' }}>
+                            <span className="text-sm text-gray-600">—</span>
+                          </td>
                         </motion.tr>
                         
                         {/* Alerts rows for this directory */}
@@ -868,7 +876,7 @@ export function WebshellAlerts() {
                                 exit={{ opacity: 0 }}
                                 className="border-b border-gray-100"
                               >
-                                <td colSpan={6} className="px-4 py-3 pl-8 text-center text-xs text-gray-500">
+                                <td colSpan={7} className="px-4 py-3 pl-8 text-center text-xs text-gray-500">
                                   Đang tải cảnh báo...
                                 </td>
                               </motion.tr>
@@ -934,6 +942,16 @@ export function WebshellAlerts() {
                                       <Calendar size={14} />
                                       <span>{alert.detectionTime}</span>
                                     </div>
+                                  </td>
+                                  <td className="px-4 py-3 pl-8" style={{ width: '120px' }}>
+                                    {alert.version && alert.version !== '—' ? (
+                                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs bg-purple-100 text-purple-700 font-medium">
+                                        <Hash size={12} />
+                                        {alert.version}
+                                      </span>
+                                    ) : (
+                                      <span className="text-sm text-gray-400">—</span>
+                                    )}
                                   </td>
                                 </motion.tr>
                                 );
@@ -1172,6 +1190,25 @@ whileHover={{ scale: 1.05 }}
                     <Info size={16} />
                     Lý do: {selectedAlert.reason}
                   </span>
+
+                  {selectedAlert.version && selectedAlert.version !== '—' && (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(139, 92, 246, 0.12)',
+                        color: '#7C3AED',
+                        fontSize: '13px',
+                        fontWeight: 500,
+                      }}
+                    >
+                      <Hash size={16} />
+                      Version: {selectedAlert.version}
+                    </span>
+                  )}
                 </div>
 
                 <section
@@ -1200,6 +1237,14 @@ whileHover={{ scale: 1.05 }}
                       </p>
                       <p style={{ fontSize: '14px', color: '#1f2937' }}>{selectedAlert.agentId}</p>
                     </div>
+                    {selectedAlert.version && selectedAlert.version !== '—' && (
+                      <div>
+                        <p style={{ fontSize: '11px', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 4 }}>
+                          Version
+                        </p>
+                        <p style={{ fontSize: '14px', color: '#1f2937', fontWeight: 500 }}>{selectedAlert.version}</p>
+                      </div>
+                    )}
                     <div style={{ gridColumn: '1 / -1' }}>
                       <p style={{ fontSize: '11px', textTransform: 'uppercase', color: '#94a3b8', marginBottom: 4 }}>
                         Đường dẫn
