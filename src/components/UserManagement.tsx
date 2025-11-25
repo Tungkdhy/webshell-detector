@@ -149,13 +149,11 @@ export function UserManagement() {
         if (err instanceof CanceledError) {
           return;
         }
-        if (isAxiosError(err)) {
-          setError(err.response?.data?.message ?? err.message);
-        } else if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError('Không thể tải dữ liệu người dùng');
+        // Bỏ qua lỗi token đã được interceptor xử lý
+        if (err instanceof Error && err.message === 'Token expired - handled by interceptor') {
+          return;
         }
+        // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
       } finally {
         if (!signal?.aborted) {
           setLoading(false);
@@ -251,13 +249,7 @@ export function UserManagement() {
       handleCloseDialog();
       fetchUsers();
     } catch (err) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message ?? err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Không thể lưu người dùng');
-      }
+      // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
     } finally {
       setSubmitting(false);
     }
@@ -281,13 +273,7 @@ export function UserManagement() {
       );
       fetchUsers();
     } catch (err) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message ?? err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Không thể cập nhật trạng thái người dùng');
-      }
+      // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
     }
   };
 
@@ -319,13 +305,7 @@ export function UserManagement() {
       setAllAgents(allAgentsRes.data.items || []);
       setUserAgents(userAgentsRes.data.agent_unique_ids || []);
     } catch (err) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message ?? err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Không thể tải danh sách agents');
-      }
+      // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
     } finally {
       setLoadingAgents(false);
     }
@@ -353,7 +333,7 @@ export function UserManagement() {
     }
 
     try {
-      await axios.post(
+      await axios.put(
         `${USERS_ENDPOINT}/${selectedUserForAgents.id}/agents`,
         { agent_unique_ids: newAgentUniqueIds },
         {
@@ -367,13 +347,7 @@ export function UserManagement() {
       );
       setUserAgents(newAgentUniqueIds);
     } catch (err) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message ?? err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Không thể cập nhật agents');
-      }
+      // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
     }
   };
 
@@ -416,13 +390,7 @@ export function UserManagement() {
       handleClosePasswordDialog();
       fetchUsers();
     } catch (err) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message ?? err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Không thể đổi mật khẩu');
-      }
+      // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
     } finally {
       setChangingPassword(false);
     }
@@ -447,21 +415,6 @@ export function UserManagement() {
         </div>
       </motion.div>
 
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-        >
-          <div className="flex items-start gap-2">
-            <AlertCircle className="mt-0.5 h-4 w-4" />
-            <div>
-              <p className="font-medium">Không thể tải dữ liệu người dùng</p>
-              <p>{error}</p>
-            </div>
-          </div>
-        </motion.div>
-      )}
 
       <div className="mb-4 grid grid-cols-3 gap-3">
         <motion.div
@@ -503,7 +456,7 @@ export function UserManagement() {
         transition={{ delay: 0.3 }}
         className="overflow-hidden rounded-lg bg-white shadow-lg"
       >
-        <div className="flex items-center justify-end border-b border-gray-200 bg-gray-50 px-4 py-2">
+        <div style={{justifyContent: 'flex-end'}} className="flex items-center justify-end border-b border-gray-200 bg-gray-50 px-4 py-2">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -725,11 +678,6 @@ export function UserManagement() {
               </div>
 
               <form onSubmit={handleSubmit} className="p-4 space-y-3">
-                {error && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
-                    {error}
-                  </div>
-                )}
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -851,11 +799,6 @@ export function UserManagement() {
               </div>
 
               <form onSubmit={handleChangePassword} className="p-4 space-y-3">
-                {error && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
-                    {error}
-                  </div>
-                )}
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -930,11 +873,6 @@ export function UserManagement() {
               </div>
 
               <div className="p-4">
-                {error && (
-                  <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
-                    {error}
-                  </div>
-                )}
 
                 {loadingAgents ? (
                   <div className="py-8 text-center text-sm text-gray-500">Đang tải...</div>

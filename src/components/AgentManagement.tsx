@@ -111,6 +111,14 @@ const deriveStatus = (lastSeen?: string): AgentStatus => {
   return 'inactive';
 };
 
+const isMoreThanOneHour = (lastSeen?: string): boolean => {
+  if (!lastSeen) return false;
+  const last = new Date(lastSeen);
+  if (Number.isNaN(last.getTime())) return false;
+  const diffSeconds = (Date.now() - last.getTime()) / 1000;
+  return diffSeconds > 3600; // 1 hour = 3600 seconds
+};
+
 const normalizeAgent = (agent: AgentApiItem): NormalizedAgent => {
   const status = deriveStatus(agent.last_seen);
   return {
@@ -165,13 +173,7 @@ export function AgentManagement() {
         setAgents(normalized);
       } catch (err) {
         if (err instanceof CanceledError) return;
-        if (isAxiosError(err)) {
-          setError(err.response?.data?.message ?? err.message);
-        } else if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError('Không thể tải danh sách agent');
-        }
+        // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
       } finally {
         if (silent) {
           if (!signal?.aborted) {
@@ -240,16 +242,6 @@ export function AgentManagement() {
         </div>
       </motion.div>
 
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-        >
-          <p className="font-medium">Không thể tải dữ liệu agent</p>
-          <p>{error}</p>
-        </motion.div>
-      )}
 
       {/* Search and Filter */}
       <motion.div
@@ -324,11 +316,15 @@ export function AgentManagement() {
                 </div>
 
                 <div className="space-y-2 text-xs text-gray-600 mb-3">
-                  <div className="flex items-center gap-1">
-                    <Clock size={12} className="text-gray-400" />
-                    <span>Hoạt động gần nhất:</span>
-                    <span className="text-gray-800">{agent.lastSeen}</span>
-                    <span className="text-gray-400">({agent.lastSeenRelative})</span>
+                  <div className={`flex items-center gap-1 px-2 py-1 rounded ${
+                    isMoreThanOneHour(agent.lastSeenIso) 
+                      ? 'bg-orange-50 border border-orange-200' 
+                      : ''
+                  }`}>
+                    <Clock size={12} className={isMoreThanOneHour(agent.lastSeenIso) ? 'text-orange-500' : 'text-gray-400'} />
+                    <span className={isMoreThanOneHour(agent.lastSeenIso) ? 'text-orange-700 font-medium' : ''}>Hoạt động gần nhất:</span>
+                    <span className={isMoreThanOneHour(agent.lastSeenIso) ? 'text-orange-800 font-semibold' : 'text-gray-800'}>{agent.lastSeen}</span>
+                    <span className={isMoreThanOneHour(agent.lastSeenIso) ? 'text-orange-600 font-medium' : 'text-gray-400'}>({agent.lastSeenRelative})</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <Network size={12} className="text-gray-400" />

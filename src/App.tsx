@@ -15,6 +15,7 @@ import { WebshellAlerts } from './components/WebshellAlerts';
 import { AgentManagement } from './components/AgentManagement';
 import { DetectionHistory } from './components/DetectionHistory';
 import { UserManagement } from './components/UserManagement';
+import { Toaster } from './components/ui/sonner';
 
 function Layout() {
   const location = useLocation();
@@ -49,6 +50,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <Toaster />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route

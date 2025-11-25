@@ -88,13 +88,7 @@ export function Sidebar() {
       handleClosePasswordDialog();
       alert('Đổi mật khẩu thành công!');
     } catch (err) {
-      if (isAxiosError(err)) {
-        setPasswordError(err.response?.data?.message ?? err.message);
-      } else if (err instanceof Error) {
-        setPasswordError(err.message);
-      } else {
-        setPasswordError('Không thể đổi mật khẩu');
-      }
+      // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
     } finally {
       setChangingPassword(false);
     }
@@ -256,11 +250,6 @@ export function Sidebar() {
               </div>
 
               <form onSubmit={handleChangePassword} className="p-4 space-y-3">
-                {passwordError && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
-                    {passwordError}
-                  </div>
-                )}
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">

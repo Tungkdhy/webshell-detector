@@ -300,13 +300,7 @@ export function WebshellAlerts() {
         if (err instanceof CanceledError) {
           return;
         }
-        if (isAxiosError(err)) {
-          setError(err.response?.data?.message ?? err.message);
-        } else if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError('Không thể tải dữ liệu monitor directories');
-        }
+        // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
       } finally {
         if (!silent && !signal?.aborted) {
           setLoading(false);
@@ -381,13 +375,11 @@ export function WebshellAlerts() {
         if (err instanceof CanceledError) {
           return;
         }
-        if (isAxiosError(err)) {
-          setError(err.response?.data?.message ?? err.message);
-        } else if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError('Không thể tải dữ liệu cảnh báo');
+        // Bỏ qua lỗi token đã được interceptor xử lý
+        if (err instanceof Error && err.message === 'Token expired - handled by interceptor') {
+          return;
         }
+        // Tất cả lỗi API đã được interceptor xử lý và hiển thị toast
       } finally {
         if (silent && !signal?.aborted) {
           setRefreshing(false);
@@ -611,21 +603,6 @@ export function WebshellAlerts() {
         </div>
       </motion.div>
 
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-        >
-          <div className="flex items-start gap-2">
-            <AlertCircle className="mt-0.5 h-4 w-4" />
-            <div>
-              <p className="font-medium">Không thể tải dữ liệu cảnh báo</p>
-              <p>{error}</p>
-            </div>
-          </div>
-        </motion.div>
-      )}
 
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
         <motion.div
