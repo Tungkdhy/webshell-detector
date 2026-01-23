@@ -16,6 +16,8 @@ import {
   Check,
   Key,
   Power,
+  Phone,
+  Edit,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -49,6 +51,7 @@ interface UserApiItem {
   last_login: string | null;
   full_name: string | null;
   email: string | null;
+  phone: string | null;
   password_changed_at: string;
 }
 
@@ -89,6 +92,7 @@ interface UserFormData {
   is_active: boolean;
   full_name: string;
   email: string;
+  phone: string;
 }
 
 export function UserManagement() {
@@ -105,6 +109,7 @@ export function UserManagement() {
     is_active: true,
     full_name: '',
     email: '',
+    phone: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [showAgentsDialog, setShowAgentsDialog] = useState(false);
@@ -178,6 +183,7 @@ export function UserManagement() {
         is_active: userItem.is_active,
         full_name: userItem.full_name || '',
         email: userItem.email || '',
+        phone: userItem.phone || '',
       });
     } else {
       setEditingUser(null);
@@ -187,6 +193,7 @@ export function UserManagement() {
         is_active: true,
         full_name: '',
         email: '',
+        phone: '',
       });
     }
     setShowDialog(true);
@@ -201,6 +208,7 @@ export function UserManagement() {
       is_active: true,
       full_name: '',
       email: '',
+      phone: '',
     });
   };
 
@@ -215,6 +223,7 @@ export function UserManagement() {
         is_active: formData.is_active,
         full_name: formData.full_name || undefined,
         email: formData.email || undefined,
+        phone: formData.phone || undefined,
       };
 
       if (editingUser) {
@@ -475,11 +484,12 @@ export function UserManagement() {
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Tên đăng nhập</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Họ tên</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Email</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Số điện thoại</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Trạng thái</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Quyền</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Tạo lúc</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Đăng nhập cuối</th>
-                <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Hành động</th>
+                <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 whitespace-nowrap">Hành động</th>
               </tr>
             </thead>
             <tbody>
@@ -492,7 +502,7 @@ export function UserManagement() {
                     exit={{ opacity: 0 }}
                     className="border-b border-gray-100"
                   >
-                    <td colSpan={9} className="px-4 py-6 text-center text-sm text-gray-500">
+                    <td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">
                       Đang tải dữ liệu người dùng...
                     </td>
                   </motion.tr>
@@ -504,7 +514,7 @@ export function UserManagement() {
                     exit={{ opacity: 0 }}
                     className="border-b border-gray-100"
                   >
-                    <td colSpan={9} className="px-4 py-6 text-center text-sm text-gray-500">
+                    <td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">
                       Không có người dùng nào
                     </td>
                   </motion.tr>
@@ -516,8 +526,7 @@ export function UserManagement() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, x: -20 }}
                       transition={{ delay: index * 0.03 }}
-                      className="border-b border-gray-100 bg-white transition-colors hover:bg-gray-50 cursor-pointer"
-                      onClick={() => handleOpenPasswordDialog(userItem)}
+                      className="border-b border-gray-100 bg-white transition-colors hover:bg-gray-50"
                     >
                       <td className="px-4 py-3 text-sm text-gray-700 align-middle">{userItem.id}</td>
                       <td className="px-4 py-3 align-middle">
@@ -535,6 +544,18 @@ export function UserManagement() {
                             <>
                               <Mail className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
                               <span className="truncate">{userItem.email}</span>
+                            </>
+                          ) : (
+                            <span>—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-middle">
+                        <div className="flex items-center gap-1.5 text-sm text-gray-700">
+                          {userItem.phone ? (
+                            <>
+                              <Phone className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                              <span className="truncate">{userItem.phone}</span>
                             </>
                           ) : (
                             <span>—</span>
@@ -602,8 +623,34 @@ export function UserManagement() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center justify-center gap-2">
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenDialog(userItem);
+                            }}
+                            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 shadow-md"
+                            title="Sửa người dùng"
+                          >
+                            <Edit size={14} />
+                            Sửa
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenPasswordDialog(userItem);
+                            }}
+                            className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-amber-700 shadow-md"
+                            title="Đổi mật khẩu"
+                          >
+                            <Key size={14} />
+                            Mật khẩu
+                          </motion.button>
                           <motion.button
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
@@ -618,7 +665,7 @@ export function UserManagement() {
                             }`}
                             title={userItem.is_active ? 'Vô hiệu hóa tài khoản' : 'Kích hoạt tài khoản'}
                           >
-                            <Power size={16} className="text-white" />
+                            <Power size={14} />
                           </motion.button>
                           <motion.button
                             whileHover={{ scale: 1.05 }}
@@ -630,7 +677,7 @@ export function UserManagement() {
                             className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-indigo-700 shadow-md"
                             title="Quản lý Agents"
                           >
-                            <Server size={16} className="text-white" />
+                            <Server size={14} />
                           </motion.button>
                         </div>
                       </td>
@@ -650,7 +697,7 @@ export function UserManagement() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
             onClick={handleCloseDialog}
           >
             <motion.div
@@ -693,19 +740,28 @@ export function UserManagement() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Mật khẩu {!editingUser && <span className="text-red-500">*</span>}
-                  </label>
-                  <input
-                    type="password"
-                    required={!editingUser}
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder={editingUser ? 'Để trống nếu không đổi' : ''}
-                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
+                {!editingUser && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Mật khẩu <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                )}
+
+                {editingUser && (
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                    <p className="text-xs text-blue-700">
+                      💡 Để đổi mật khẩu, vui lòng sử dụng nút <strong>"Mật khẩu"</strong> trong cột hành động.
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Họ tên</label>
@@ -723,6 +779,17 @@ export function UserManagement() {
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Số điện thoại</label>
+                  <input
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="VD: 0123456789"
                     className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
@@ -771,7 +838,7 @@ export function UserManagement() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
             onClick={handleClosePasswordDialog}
           >
             <motion.div
@@ -845,7 +912,7 @@ export function UserManagement() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
             onClick={handleCloseAgentsDialog}
           >
             <motion.div
